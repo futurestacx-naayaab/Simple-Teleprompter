@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Teleprompter Pro - Centered Column</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+<style>
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: #000;
+  color: white;
+}
+
+/* HEADER CONTROLS */
+#controls {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  background: rgba(20, 20, 20, 0.95);
+  border-bottom: 1px solid #333;
+  padding: 10px;
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+  align-items: center;
+  z-index: 100;
+}
+
+.icon-btn {
+  background: #333;
+  border: 1px solid #555;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.icon-btn:hover {
+  background: #444;
+}
+
+.icon-btn.active {
+  background: #007bff;
+  border-color: #0056b3;
+}
+
+.value {
+  font-size: 13px;
+  min-width: 30px;
+  color: #aaa;
+}
+
+label {
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* PROMPTER LAYOUT */
+#container {
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: center; /* CHANGED: This centers the text column */
+}
+
+#text-wrapper {
+  position: relative;
+  width: 35%; /* Controllable via slider */
+  height: 100%;
+  box-sizing: border-box;
+  /* Optional: visual borders to see the column width */
+  border-left: 1px solid rgba(255,255,255,0.05);
+  border-right: 1px solid rgba(255,255,255,0.05);
+}
+
+#text {
+  position: absolute;
+  width: 100%;
+  text-align: center; /* Default text inside column to center */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  will-change: transform;
+}
+
+.line {
+  opacity: 0.3;
+  transition: opacity 0.2s ease;
+  padding: 5px 0;
+}
+
+.line.active {
+  opacity: 1;
+}
+
+.end-script {
+  color: #ff4444;
+  font-weight: bold;
+  padding: 150px 0;
+  font-size: 1.2em;
+  opacity: 0.8;
+}
+
+/* GUIDES */
+#safeZone {
+  position: absolute;
+  top: 45%;
+  height: 10%;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+#eyeLine {
+  position: absolute;
+  top: 50%;
+  width: 100%;
+  height: 2px;
+  background: rgba(255, 0, 0, 0.5);
+  pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="controls">
+  <button id="playBtn" class="icon-btn" onclick="toggle()" title="Spacebar">
+    <i class="fas fa-play"></i>
+  </button>
+
+  <button class="icon-btn" onclick="restart(true)" title="Press 'R' for Timer">
+    <i class="fas fa-rotate"></i>
+  </button>
+
+  <label>Speed <input type="range" id="speed" min="0.1" max="10" step="0.1" value="1.0"> <span id="speedVal" class="value">1.0</span></label>
+  <label>Font <input type="range" id="font" min="20" max="120" value="45"> <span id="fontVal" class="value">45</span></label>
+  
+  <label>Width % <input type="range" id="containerWidth" min="10" max="100" value="35"> <span id="widthVal" class="value">35</span></label>
+  
+  <label>Margin <input type="range" id="margin" min="0" max="100" value="20"> <span id="marginVal" class="value">20</span></label>
+
+  <div style="display: flex; gap: 2px;">
+    <button class="icon-btn" id="btn-left" onclick="setAlign('left')"><i class="fas fa-align-left"></i></button>
+    <button class="icon-btn active" id="btn-center" onclick="setAlign('center')"><i class="fas fa-align-center"></i></button>
+  </div>
+
+  <label><input type="checkbox" id="mirror"> Mirror</label>
+  <input type="color" id="textColor" value="#ffffff">
+  <input type="color" id="bgColor" value="#000000">
+</div>
+
+<div id="container">
+  <div id="text-wrapper">
+    <div id="safeZone"></div>
+    <div id="eyeLine"></div>
+    <div id="text"></div>
+  </div>
+</div>
+
+<script>
+/** DATA & SETUP **/
+const defaultData = { 
+    script: "The prompter column is now CENTERED.\n\nAdjust the 'Width %' slider to see the column grow or shrink from the middle.\n\nKey Controls:\n- SPACE: Play/Pause\n- R: Restart with 3s Timer\n- Arrows: Nudge text up/down", 
+    countdown: 3 
+};
+const data = JSON.parse(localStorage.getItem("tp_data")) || defaultData;
+
+const textEl = document.getElementById("text");
+const wrapperEl = document.getElementById("text-wrapper");
+const playBtn = document.getElementById("playBtn");
+
+// Build Script Lines
+data.script.split("\n").forEach(lineText => {
+  const div = document.createElement("div");
+  div.className = "line";
+  div.textContent = lineText || " ";
+  textEl.appendChild(div);
+});
+
+// Add End Marker
+const endMarker = document.createElement("div");
+endMarker.className = "end-script";
+endMarker.textContent = "—— END ——";
+textEl.appendChild(endMarker);
+
+/** STATE **/
+let y;
+let isPlaying = false;
+let alignMode = "center";
+let animationId;
+let countdownActive = false;
+
+function updateTransform() {
+  let transform = `translateY(${y}px)`;
+  if (document.getElementById("mirror").checked) transform += " scaleX(-1)";
+  textEl.style.transform = transform;
+  highlight();
+}
+
+function restart(withTimer = false) {
+  cancelAnimationFrame(animationId);
+  y = window.innerHeight; 
+  updateTransform();
+  isPlaying = false;
+  updatePlayIcon();
+  if (withTimer) startCountdown(3);
+}
+
+function toggle() {
+  if(countdownActive) return;
+  isPlaying = !isPlaying;
+  updatePlayIcon();
+  if (isPlaying) animate();
+}
+
+function updatePlayIcon() {
+  playBtn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
+}
+
+function setAlign(type) {
+  alignMode = type;
+  document.getElementById('btn-left').classList.toggle("active", type === 'left');
+  document.getElementById('btn-center').classList.toggle("active", type === 'center');
+  updateStyles();
+}
+
+function updateStyles() {
+  const widthVal = document.getElementById("containerWidth").value;
+  wrapperEl.style.width = widthVal + "%";
+  document.getElementById("widthVal").innerText = widthVal;
+
+  textEl.style.fontSize = document.getElementById("font").value + "px";
+  textEl.style.padding = `0 ${document.getElementById("margin").value}px`;
+  textEl.style.color = document.getElementById("textColor").value;
+  textEl.style.textAlign = alignMode;
+  document.body.style.background = document.getElementById("bgColor").value;
+  updateTransform();
+}
+
+function highlight() {
+  const mid = window.innerHeight / 2;
+  document.querySelectorAll(".line").forEach(el => {
+    const rect = el.getBoundingClientRect();
+    if (rect.top < mid && rect.bottom > mid) el.classList.add("active");
+    else el.classList.remove("active");
+  });
+}
+
+/** ENGINE **/
+function animate() {
+  if (!isPlaying) return;
+  const endRect = endMarker.getBoundingClientRect();
+  if (endRect.top <= window.innerHeight / 2) {
+    isPlaying = false;
+    updatePlayIcon();
+    return;
+  }
+  y -= parseFloat(document.getElementById("speed").value);
+  updateTransform();
+  animationId = requestAnimationFrame(animate);
+}
+
+/** LISTENERS **/
+["speed", "font", "margin", "containerWidth"].forEach(id => {
+  const el = document.getElementById(id);
+  el.oninput = () => {
+    if(id === "speed") document.getElementById("speedVal").innerText = el.value;
+    updateStyles();
+  };
+});
+
+[document.getElementById("textColor"), document.getElementById("bgColor"), document.getElementById("mirror")].forEach(el => {
+  el.oninput = updateStyles;
+});
+
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); toggle(); }
+  if (e.code === "KeyR") restart(true);
+  if (e.code === "ArrowUp") { e.preventDefault(); y += 40; updateTransform(); }
+  if (e.code === "ArrowDown") { e.preventDefault(); y -= 40; updateTransform(); }
+});
+
+function startCountdown(sec) {
+  countdownActive = true;
+  isPlaying = false;
+  updatePlayIcon();
+  if (sec <= 0) {
+    countdownActive = false;
+    isPlaying = true;
+    updatePlayIcon();
+    animate();
+    return;
+  }
+  const c = document.createElement("div");
+  Object.assign(c.style, {
+    position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+    fontSize: "120px", fontWeight: "bold", color: "white", zIndex: "1000",
+    textShadow: "0 0 20px rgba(0,0,0,0.8)"
+  });
+  c.innerText = sec;
+  document.body.appendChild(c);
+  setTimeout(() => { c.remove(); startCountdown(sec - 1); }, 1000);
+}
+
+// Init
+restart(false);
+updateStyles();
+
+</script>
+</body>
+</html>
